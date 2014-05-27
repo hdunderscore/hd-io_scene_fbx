@@ -29,7 +29,6 @@ bl_info = {
     "warning": "",
     "wiki_url": "http://wiki.blender.org/index.php/Extensions:2.6/Py/"
                 "Scripts/Import-Export/Autodesk_FBX",
-    "tracker_url": "",
     "support": 'OFFICIAL',
     "category": "Import-Export"}
 
@@ -227,13 +226,11 @@ class ExportFBX(bpy.types.Operator, ExportHelper):
         description="Apply modifiers to mesh objects (except Armature ones!)",
         default=True,
     )
-
     recalc_split_normals = BoolProperty(
         name="Recalc. Split Normals",
         description="Recalc. normals? Otherwise export normals.",
         default=True,
     )
-
     mesh_smooth_type = EnumProperty(
         name="Smoothing",
         items=(('OFF', "Off", "Don't write smoothing"),

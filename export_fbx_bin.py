@@ -65,8 +65,7 @@ from .fbx_utils import (
     elem_data_single_float32, elem_data_single_float64,
     elem_data_single_bytes, elem_data_single_string, elem_data_single_string_unicode,
     elem_data_single_bool_array, elem_data_single_int32_array, elem_data_single_int64_array,
-    elem_data_single_float32_array, elem_data_single_float64_array,
-    elem_data_single_byte_array, elem_data_vec_float64,
+    elem_data_single_float32_array, elem_data_single_float64_array, elem_data_vec_float64,
     # FBX element properties.
     elem_properties, elem_props_set, elem_props_compound,
     # FBX element properties handling templates.
@@ -249,7 +248,7 @@ def fbx_template_def_camera(scene, settings, override_defaults=None, nbr_users=0
         (b"ShowAzimut", (True, "p_bool", False)),
         (b"ShowTimeCode", (True, "p_bool", False)),
         (b"ShowAudio", (False, "p_bool", False)),
-        (b"AudioColor", ((0.0, 1.0, 0.0), "p_vector_3d", False)),  # Yep, vector3d, not corlorgbâ€¦ :cry:
+        (b"AudioColor", ((0.0, 1.0, 0.0), "p_vector_3d", False)),  # Yep, vector3d, not corlorgb… :cry:
         (b"NearPlane", (1.0, "p_double", False)),
         (b"FarPlane", (100.0, "p_double", False)),
         (b"AutoComputeClipPanes", (False, "p_bool", False)),
@@ -814,7 +813,6 @@ def fbx_data_mesh_elements(root, me_obj, scene_data, done_meshes):
     # NOTE: this is not supported by importer currently.
     # XXX Official docs says normals should use IndexToDirect,
     #     but this does not seem well supported by apps currently...
-
     if scene_data.settings.recalc_split_normals:
         me.calc_normals_split()
 
@@ -873,6 +871,7 @@ def fbx_data_mesh_elements(root, me_obj, scene_data, done_meshes):
         # Normal weights, no idea what it is.
         #t_ln = array.array(data_types.ARRAY_FLOAT64, (0.0,)) * len(me.vertices)
         #elem_data_single_float64_array(lay_nor, b"NormalsW", t_ln)
+        del t_ln
 
     # tspace
     tspacenumber = 0
@@ -1202,18 +1201,29 @@ def fbx_data_video_elements(root, vid, scene_data):
 
     elem_data_single_string(fbx_vid, b"Type", b"Clip")
     # XXX No Version???
+
+    tmpl = elem_props_template_init(scene_data.templates, b"Video")
+    props = elem_properties(fbx_vid)
+    elem_props_template_set(tmpl, props, "p_string_url", b"Path", fname_abs)
+    elem_props_template_finalize(tmpl, props)
+
+    elem_data_single_int32(fbx_vid, b"UseMipMap", 0)
     elem_data_single_string_unicode(fbx_vid, b"FileName", fname_abs)
     elem_data_single_string_unicode(fbx_vid, b"RelativeFilename", fname_rel)
 
     if scene_data.settings.media_settings.embed_textures:
-        try:
-            with open(vid.filepath, 'br') as f:
-                elem_data_single_byte_array(fbx_vid, b"Content", f.read())
-        except Exception as e:
-            print("WARNING: embeding file {} failed ({})".format(vid.filepath, e))
-            elem_data_single_byte_array(fbx_vid, b"Content", b"")
+        if vid.packed_file is not None:
+            elem_data_single_bytes(fbx_vid, b"Content", vid.packed_file.data)
+        else:
+            filepath = bpy.path.abspath(vid.filepath)
+            try:
+                with open(filepath, 'br') as f:
+                    elem_data_single_bytes(fbx_vid, b"Content", f.read())
+            except Exception as e:
+                print("WARNING: embedding file {} failed ({})".format(filepath, e))
+                elem_data_single_bytes(fbx_vid, b"Content", b"")
     else:
-        elem_data_single_byte_array(fbx_vid, b"Content", b"")
+        elem_data_single_bytes(fbx_vid, b"Content", b"")
 
 
 def fbx_data_armature_elements(root, arm_obj, scene_data):
@@ -1452,7 +1462,7 @@ def fbx_data_animation_elements(root, scene_data):
                         nbr_keys = len(keys)
                         # flags...
                         keyattr_flags = (
-                            1 << 3 |   # interpolation mode, 1 = constant, 2 = linear, 3 = cubic.
+                            1 << 2 |   # interpolation mode, 1 = constant, 2 = linear, 3 = cubic.
                             1 << 8 |   # tangent mode, 8 = auto, 9 = TCB, 10 = user, 11 = generic break,
                             1 << 13 |  # tangent mode, 12 = generic clamp, 13 = generic time independent,
                             1 << 14 |  # tangent mode, 13 + 14 = generic clamp progressive.
@@ -1578,14 +1588,16 @@ def fbx_animations_simplify(scene_data, animdata):
     # So that, with default factor and step values (1), we get:
     max_frame_diff = step * fac * 10  # max step of 10 frames.
     value_diff_fac = fac / 1000  # min value evolution: 0.1% of whole range.
+    min_significant_diff = 1.0e-6
 
     for keys in animdata.values():
         if not keys:
             continue
         extremums = [(min(values), max(values)) for values in zip(*(k[1] for k in keys))]
-        min_diffs = [max((mx - mn) * value_diff_fac, 0.000001) for mx, mn in extremums]
+        min_diffs = [max((mx - mn) * value_diff_fac, min_significant_diff) for mn, mx in extremums]
         p_currframe, p_key, p_key_write = keys[0]
         p_keyed = [(p_currframe - max_frame_diff, val) for val in p_key]
+        are_keyed = [False] * len(p_key)
         for currframe, key, key_write in keys:
             for idx, (val, p_val) in enumerate(zip(key, p_key)):
                 p_keyedframe, p_keyedval = p_keyed[idx]
@@ -1597,14 +1609,23 @@ def fbx_animations_simplify(scene_data, animdata):
                     key_write[idx] = True
                     p_key_write[idx] = True
                     p_keyed[idx] = (currframe, val)
-                elif (abs(val - p_keyedval) >= min_diffs[idx]) or (currframe - p_keyedframe >= max_frame_diff):
-                    # Else, if enough difference from previous keyed value (or max gap between keys is reached),
-                    # key this value only!
-                    key_write[idx] = True
-                    p_keyed[idx] = (currframe, val)
+                    are_keyed[idx] = True
+                else:
+                    frame_diff = currframe - p_keyedframe
+                    val_diff = abs(val - p_keyedval)
+                    if ((val_diff >= min_diffs[idx]) or
+                        ((val_diff >= min_significant_diff) and (frame_diff >= max_frame_diff))):
+                        # Else, if enough difference from previous keyed value
+                        # (or any significant difference and max gap between keys is reached),
+                        # key this value only!
+                        key_write[idx] = True
+                        p_keyed[idx] = (currframe, val)
+                        are_keyed[idx] = True
             p_currframe, p_key, p_key_write = currframe, key, key_write
-        # Always key last sampled values (we ignore curves with a single valid key anyway).
-        p_key_write[:] = [True] * len(p_key_write)
+        # If we did key something, ensure first and last sampled values are keyed as well.
+        for idx, is_keyed in enumerate(are_keyed):
+            if is_keyed:
+                keys[0][2][idx] = keys[-1][2][idx] = True
 
 
 def fbx_animations_objects_do(scene_data, ref_id, f_start, f_end, start_zero, objects=None, force_keep=False):
@@ -1835,6 +1856,9 @@ def fbx_animations_objects(scene_data):
     if not scene_data.settings.bake_anim_use_nla_strips or not animations:
         add_anim(animations, fbx_animations_objects_do(scene_data, None, scene.frame_start, scene.frame_end, False))
 
+    # Be sure to update all matrices back to org state!
+    scene.frame_set(scene.frame_current, 0.0)
+
     return animations, frame_start, frame_end
 
 
@@ -1924,6 +1948,8 @@ def fbx_data_from_scene(scene, settings):
         # If obj is not a valid object for materials, wrapper will just return an empty tuple...
         for mat_s in ob_obj.material_slots:
             mat = mat_s.material
+            if mat is None:
+                continue  # Empty slots!
             # Note theoretically, FBX supports any kind of materials, even GLSL shaders etc.
             # However, I doubt anything else than Lambert/Phong is really portable!
             # We support any kind of 'surface' shader though, better to have some kind of default Lambert than nothing.
@@ -2110,15 +2136,16 @@ def fbx_data_from_scene(scene, settings):
     for mat, (mat_key, ob_objs) in data_materials.items():
         for ob_obj in ob_objs:
             connections.append((b"OO", get_fbx_uuid_from_key(mat_key), ob_obj.fbx_uuid, None))
-            if ob_obj.is_object:
-                # Get index of this mat for this object.
-                # Mat indices for mesh faces are determined by their order in 'mat to ob' connections.
-                # Only mats for meshes currently...
-                if ob_obj.type not in BLENDER_OBJECT_TYPES_MESHLIKE:
-                    continue
-                me = ob_obj.bdata.data
-                idx = _objs_indices[ob_obj] = _objs_indices.get(ob_obj, -1) + 1
-                mesh_mat_indices.setdefault(me, OrderedDict())[mat] = idx
+            # Get index of this mat for this object (or dupliobject).
+            # Mat indices for mesh faces are determined by their order in 'mat to ob' connections.
+            # Only mats for meshes currently...
+            # Note in case of dupliobjects a same me/mat idx will be generated several times...
+            # Should not be an issue in practice, and it's needed in case we export duplis but not the original!
+            if ob_obj.type not in BLENDER_OBJECT_TYPES_MESHLIKE:
+                continue
+            _mesh_key, me, _free = data_meshes[ob_obj.bdata]
+            idx = _objs_indices[ob_obj] = _objs_indices.get(ob_obj, -1) + 1
+            mesh_mat_indices.setdefault(me, OrderedDict())[mat] = idx
     del _objs_indices
 
     # Textures
@@ -2478,7 +2505,7 @@ def save_single(operator, scene, filepath="",
     settings = FBXSettings(
         operator.report, (axis_up, axis_forward), global_matrix, global_scale,
         bake_space_transform, global_matrix_inv, global_matrix_inv_transposed,
-        context_objects, object_types, use_mesh_modifiers,recalc_split_normals,
+        context_objects, object_types, use_mesh_modifiers, recalc_split_normals,
         mesh_smooth_type, use_mesh_edges, use_tspace, False,
         bake_anim, bake_anim_use_nla_strips, bake_anim_use_all_actions, bake_anim_step, bake_anim_simplify_factor,
         False, media_settings, use_custom_properties,

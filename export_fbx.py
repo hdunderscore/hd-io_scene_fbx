@@ -1488,25 +1488,6 @@ def save_single(operator, scene, filepath="",
             fw(',\n\t\t\t         '.join(','.join('%.6f' % n for n in chunk) for chunk in grouper_exact(t_vn, _nchunk)))
             fw('\n\t\t}')
             del t_vn
-##            fw('\n\t\tLayerElementNormal: 0 {'
-##               '\n\t\t\tVersion: 101'
-##               '\n\t\t\tName: ""'
-##               '\n\t\t\tMappingInformationType: "ByVertice"'
-##               '\n\t\t\tReferenceInformationType: "Direct"'
-##               '\n\t\t\tNormals: ')
-##
-##            i = -1
-##            for v in me.vertices:
-##                if i == -1:
-##                    fw('%.15f,%.15f,%.15f' % v.normal[:])
-##                    i = 0
-##                else:
-##                    if i == 2:
-##                        fw('\n\t\t\t ')
-##                        i = 0
-##                    fw(',%.15f,%.15f,%.15f' % v.normal[:])
-##                i += 1
-##            fw('\n\t\t}')
 
         # Write Face Smoothing
         _nchunk = 64  # Number of bool per line.
@@ -1609,7 +1590,7 @@ def save_single(operator, scene, filepath="",
                 if do_textures:
                     fw('\n\t\tLayerElementTexture: %d {'
                        '\n\t\t\tVersion: 101'
-                       '\n\t\t\tName: "%s"'
+                       '\n\t\t\tName: "%s"' 
                        '\n\t\t\tMappingInformationType: "%s"'
                        '\n\t\t\tReferenceInformationType: "IndexToDirect"'
                        '\n\t\t\tBlendMode: "Translucent"'
